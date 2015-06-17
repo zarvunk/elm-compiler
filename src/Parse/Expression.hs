@@ -24,7 +24,7 @@ import qualified Reporting.Annotation as A
 
 varTerm :: IParser Source.Expr'
 varTerm =
-  toVar <$> var <?> "variable"
+  toVar <$> var
 
 
 toVar :: String -> Source.Expr'
@@ -56,7 +56,10 @@ accessor =
 negative :: IParser Source.Expr'
 negative =
   do  (start, nTerm, end) <-
-          located (try (char '-' >> notFollowedBy (char '.' <|> char '-')) >> term)
+          located $ try $
+            do  char '-'
+                notFollowedBy (char '.' <|> char '-')
+                term
 
       let ann e =
             A.at start end e
@@ -132,8 +135,11 @@ parensTerm =
 recordTerm :: IParser Source.Expr
 recordTerm =
   addLocation $
-    brackets $ choice [ misc, record ]
+    brackets (choice [ misc, record ])
   where
+    record =
+      E.Record <$> commaSep field
+
     field =
       do  label <- rLabel
           patterns <- spacePrefix Pattern.term
@@ -141,51 +147,66 @@ recordTerm =
           body <- expr
           return (label, makeFunction patterns body)
 
-    record =
-      E.Record <$> commaSep field
-
-    change =
-      do  lbl <- rLabel
-          padded (string "<-")
-          (,) lbl <$> expr
-
-    remove r =
-      do  string "-"
-          whitespace
-          E.Remove r <$> rLabel
-
-    insert r =
-      do  string "|"
-          whitespace
-          E.Insert r <$> rLabel <*> (padded equals >> expr)
-
-    modify r =
-      do  string "|"
-          whitespace
-          E.Modify r <$> commaSep1 change
-
     misc =
-      try $ do
-        record <- addLocation (E.rawVar <$> rLabel)
-        opt <- padded (optionMaybe (addLocation (remove record)))
-        case opt of
-          Just e@(A.A _ e') ->
-              try (insert e) <|> return e'
-          Nothing ->
-              try (insert record) <|> try (modify record)
+      do  nextParser <- try miscStarter
+          whitespace
+          nextParser
+
+    miscStarter =
+      do  start <- getMyPosition
+          record <- addLocation (E.rawVar <$> rLabel)
+          whitespace
+          choice
+            [ string "-" >> return (afterMinus start record)
+            , string "|" >> return (afterBar record)
+            ]
+
+    afterMinus start record =
+      do  field <- rLabel
+          end <- getMyPosition
+          let subRecord' = E.Remove record field
+          maybe <- optionMaybe (try (whitespace >> string "|"))
+          case maybe of
+            Nothing ->
+                return subRecord'
+            Just _ ->
+                do  whitespace
+                    field <- rLabel
+                    padded equals
+                    E.Insert (A.at start end subRecord') field <$> expr
+
+    afterBar record =
+      do  field <- rLabel
+          whitespace
+          choice
+            [ do  equals
+                  whitespace
+                  E.Insert record field <$> expr
+            , do  leftArrow
+                  whitespace
+                  value <- expr
+                  updates <- spaceyPrefixBy comma update
+                  return (E.Modify record ((field,value) : updates))
+            ]
+
+    update =
+      do  lbl <- rLabel
+          padded leftArrow
+          (,) lbl <$> expr
 
 
 term :: IParser Source.Expr
 term =
   addLocation (choice [ E.Literal <$> Literal.literal, listTerm, accessor, negative ])
     <|> accessible (addLocation varTerm <|> parensTerm <|> recordTerm)
-    <?> "basic term (4, x, 'c', etc.)"
+    <?> "an expression"
 
 
 --------  Applications  --------
 
 appExpr :: IParser Source.Expr
 appExpr =
+  expecting "an expression" $
   do  t <- term
       ts <- constrainedSpacePrefix term $ \str ->
                 if null str then notFollowedBy (char '-') else return ()
@@ -209,8 +230,10 @@ binaryExpr :: IParser Source.Expr
 binaryExpr =
     Binop.binops appExpr lastExpr anyOp
   where
-    lastExpr = addLocation (choice [ ifExpr, letExpr, caseExpr ])
-            <|> lambdaExpr
+    lastExpr =
+        addLocation (choice [ ifExpr, letExpr, caseExpr ])
+        <|> lambdaExpr
+        <?> "an expression"
 
 
 ifExpr :: IParser Source.Expr'
@@ -236,17 +259,19 @@ ifExpr =
         E.MultiIf <$> spaceSep1 iff
       where
         iff =
-            do  string "|" ; whitespace
-                b <- expr ; padded arrow
+            do  string "|"
+                whitespace
+                b <- expr
+                padded rightArrow
                 (,) b <$> expr
 
 
 lambdaExpr :: IParser Source.Expr
 lambdaExpr =
-  do  char '\\' <|> char '\x03BB' <?> "anonymous function"
+  do  char '\\' <|> char '\x03BB' <?> "an anonymous function"
       whitespace
       args <- spaceSep1 Pattern.term
-      padded arrow
+      padded rightArrow
       body <- expr
       return (makeFunction args body)
 
@@ -261,7 +286,7 @@ caseExpr =
   where
     case_ =
       do  p <- Pattern.expr
-          padded arrow
+          padded rightArrow
           (,) p <$> expr
 
     with =

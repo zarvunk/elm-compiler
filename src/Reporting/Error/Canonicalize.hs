@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Canonicalize where
 
 import Data.Function (on)
@@ -131,30 +130,35 @@ distance x y =
 
 -- TO REPORT
 
-toReport :: Error -> Report.Report
-toReport err =
+namingError :: String -> String -> Report.Report
+namingError pre post =
+  Report.simple "NAMING ERROR" pre post
+
+
+toReport :: P.Dealiaser -> Error -> Report.Report
+toReport dealiaser err =
   case err of
     Var (VarError kind name problem suggestions) ->
-        let var = kind ++ " '" ++ name ++ "'"
+        let var = kind ++ " `" ++ name ++ "`"
         in
         case problem of
           Ambiguous ->
-              Report.simple
+              namingError
                 ("This usage of " ++ var ++ " is ambiguous.")
                 (maybeYouWant suggestions)
 
           UnknownQualifier qualifier ->
-              Report.simple
-                ("Cannot find " ++ var ++ ", qualifier '" ++ qualifier ++ "' is not in scope.")
+              namingError
+                ("Cannot find " ++ var ++ ", qualifier `" ++ qualifier ++ "` is not in scope.")
                 (maybeYouWant suggestions)
 
           QualifiedUnknown qualifier ->
-              Report.simple
-                ("Cannot find " ++ var ++ ", module '" ++ qualifier ++ "' does not expose that value.")
+              namingError
+                ("Cannot find " ++ var ++ ", module `" ++ qualifier ++ "` does not expose that value.")
                 (maybeYouWant suggestions)
 
           ExposedUnknown ->
-              Report.simple
+              namingError
                 ("Cannot find " ++ var)
                 (maybeYouWant suggestions)
 
@@ -169,18 +173,18 @@ toReport err =
               argMismatchReport "Type" var expected actual
 
           SelfRecursive name tvars tipe ->
-              Report.simple "This type alias is recursive, forming an infinite type!" $
+              Report.simple "ALIAS PROBLEM" "This type alias is recursive, forming an infinite type!" $
                 "Type aliases are just names for more fundamental types, so I go through\n"
                 ++ "and expand them all to know the real underlying type. The problem is that\n"
                 ++ "when I expand a recursive type alias, it keeps getting bigger and bigger.\n"
                 ++ "Dealiasing results in an infinitely large type! Try this instead:\n\n"
                 ++ "    type " ++ name ++ concatMap (' ':) tvars ++ " ="
-                ++ P.render (P.nest 8 (P.hang (P.text name) 2 (P.pretty True tipe)))
+                ++ P.render (P.nest 8 (P.hang (P.text name) 2 (P.pretty dealiaser True tipe)))
                 ++ "\n\nThis creates a brand new type that cannot be expanded. It is similar types\n"
                 ++ "like List which are recursive, but do not get expanded into infinite types."
 
           MutuallyRecursive aliases ->
-              Report.simple "This type alias is part of a mutually recursive set of type aliases." $
+              Report.simple "ALIAS PROBLEM" "This type alias is part of a mutually recursive set of type aliases." $
                 "The following type aliases all depend on each other in some way:\n"
                 ++ concatMap showName aliases ++ "\n\n"
                 ++ "The problem is that when you try to expand any of these type aliases, they\n"
@@ -195,18 +199,18 @@ toReport err =
         in
         case importError of
           ModuleNotFound suggestions ->
-              Report.simple
-                ("Could not find a module named '" ++ moduleName ++ "'")
+              namingError
+                ("Could not find a module named `" ++ moduleName ++ "`")
                 (maybeYouWant (map Module.nameToString suggestions))
 
           ValueNotFound value suggestions ->
-              Report.simple
-                ("Module '" ++ moduleName ++ "' does not expose '" ++ value ++ "'")
+              namingError
+                ("Module `" ++ moduleName ++ "` does not expose `" ++ value ++ "`")
                 (maybeYouWant suggestions)
 
     Export name suggestions ->
-        Report.simple
-          ("Could not export '" ++ name ++ "' which is not defined in this module.")
+        namingError
+          ("Could not export `" ++ name ++ "` which is not defined in this module.")
           (maybeYouWant suggestions)
 
     Port (PortError name isInbound _rootType localType maybeMessage) ->
@@ -216,16 +220,16 @@ toReport err =
 
           preHint =
             "Trying to send " ++ maybe "an unsupported type" id maybeMessage
-            ++ " through " ++ boundPort ++ " '" ++ name ++ "'"
+            ++ " through " ++ boundPort ++ " `" ++ name ++ "`"
 
           postHint =
             "The specific unsupported type is:\n\n"
-            ++ P.render (P.nest 4 (P.pretty False localType)) ++ "\n\n"
+            ++ P.render (P.nest 4 (P.pretty dealiaser False localType)) ++ "\n\n"
             ++ "The types of values that can flow through " ++ boundPort ++ "s include:\n"
             ++ "Ints, Floats, Bools, Strings, Maybes, Lists, Arrays, Tuples,\n"
             ++ "Json.Values, and concrete records."
         in
-          Report.simple preHint postHint
+          Report.simple "PORT ERROR" preHint postHint
 
 
 argMismatchReport :: String -> Var.Canonical -> Int -> Int -> Report.Report
@@ -234,12 +238,12 @@ argMismatchReport kind var expected actual =
     preHint =
       kind ++ " " ++ Var.toString var ++ " has too "
       ++ (if actual < expected then "few" else "many")
-      ++ "arguments."
+      ++ " arguments."
 
     postHint =
       "Expecting " ++ show expected ++ ", but got " ++ show actual ++ "."
   in
-      Report.Report Nothing preHint postHint
+      Report.simple "ARGUMENT" preHint postHint
 
 
 maybeYouWant :: [String] -> String
@@ -252,3 +256,29 @@ maybeYouWant suggestions =
         "Maybe you want one of the following?\n"
         ++ concatMap ("\n    "++) suggestions
 
+
+extractSuggestions :: Error -> Maybe [String]
+extractSuggestions err =
+  case err of
+    Var (VarError _ _ _ suggestions) ->
+        Just suggestions
+
+    Pattern _ ->
+        Nothing
+
+    Alias _ ->
+        Nothing
+
+    Import _ importError ->
+        case importError of
+          ModuleNotFound suggestions ->
+              Just (map Module.nameToString suggestions)
+
+          ValueNotFound _ suggestions ->
+              Just suggestions
+
+    Export _ suggestions ->
+        Just suggestions
+
+    Port _ ->
+        Nothing

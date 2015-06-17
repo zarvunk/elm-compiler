@@ -51,10 +51,17 @@ testIf
 testIf handleResult filePaths =
     traverse setupTest filePaths
   where
-    setupTest filePath =
-      do  source <- readFile filePath
-          let result = Compiler.compile "elm-lang" "core" source Map.empty
-          return (testCase filePath (handleResult result))
+    setupTest filePath = do
+      source <- readFile filePath
+
+      let (dealiaser, _warnings, result) =
+            Compiler.compile "elm-lang" "core" True source Map.empty
+      let formatErrors errors =
+            concatMap (Compiler.errorToString dealiaser filePath source) errors
+      let formattedResult =
+            either (Left . formatErrors) Right result
+
+      return $ testCase filePath (handleResult formattedResult)
 
 
 -- CHECK RESULTS
@@ -62,12 +69,19 @@ testIf handleResult filePaths =
 isSuccess :: Either String a -> Assertion
 isSuccess result =
     case result of
-      Right _ -> assertBool "" True
-      Left msg -> assertFailure msg
+      Right _ ->
+          assertBool "" True
+
+      Left errorMessages ->
+          assertFailure errorMessages
 
 
 isFailure :: Either a b -> Assertion
 isFailure result =
     case result of
-      Right _ -> assertFailure "Compilation succeeded but should have failed"
-      Left _ -> assertBool "" True
+      Right _ ->
+          assertFailure "Compilation succeeded but should have failed"
+
+      Left _ ->
+          assertBool "" True
+
