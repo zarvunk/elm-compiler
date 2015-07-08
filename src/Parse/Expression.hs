@@ -220,7 +220,7 @@ term :: IParser Source.Expr
 term =
   addLocation (choice [ E.Literal <$> Literal.literal
                       , listTerm, accessor, modifier, negative ])
-    <|> accessible (addLocation varTerm <|> parensTerm <|> recordTerm)
+    <|> accessibleOrModifiable (addLocation varTerm <|> parensTerm <|> recordTerm)
     <?> "an expression"
 
 

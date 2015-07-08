@@ -17,6 +17,7 @@ import qualified AST.Expression.General as E
 import qualified AST.Expression.Source as Source
 import qualified AST.Helpers as Help
 import qualified AST.Literal as L
+import qualified AST.Pattern as P
 import qualified AST.Variable as Variable
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Syntax as Syntax
@@ -284,12 +285,19 @@ located parser =
       return (start, value, end)
 
 
-accessible :: IParser Source.Expr -> IParser Source.Expr
-accessible exprParser =
+accessibleOrModifiable :: IParser Source.Expr -> IParser Source.Expr
+accessibleOrModifiable exprParser =
   do  start <- getMyPosition
 
-      annotatedRootExpr@(A.A _ rootExpr) <- exprParser
+      annotatedRootExpr <- exprParser
 
+      try (modification start annotatedRootExpr)
+        <|> accessible start annotatedRootExpr
+
+
+accessible :: R.Position -> Source.Expr -> IParser Source.Expr
+accessible start annotatedRootExpr@(A.A _ rootExpr) =
+  do
       access <- optionMaybe (try dot <?> "a field access like .name")
 
       case access of
@@ -297,7 +305,7 @@ accessible exprParser =
           return annotatedRootExpr
 
         Just _ ->
-          accessible $
+          accessibleOrModifiable $
             do  v <- var
                 end <- getMyPosition
                 return . A.at start end $
@@ -309,10 +317,28 @@ accessible exprParser =
                         E.Access annotatedRootExpr v
 
 
+modification :: R.Position -> Source.Expr -> IParser Source.Expr
+modification start annotatedRootExpr =
+  do  at
+      v <- var
+      end <- getMyPosition
+      let ann = A.at start end
+      return . ann $
+          E.Lambda
+            (ann $ P.Var "_")
+            (ann $ E.Modify annotatedRootExpr [(v, ann $ E.rawVar "_")] )
+
+
 dot :: IParser ()
 dot =
   do  char '.'
       notFollowedBy (char '.')
+
+
+at :: IParser ()
+at =
+  do  char '@'
+      return ()
 
 
 -- WHITESPACE
