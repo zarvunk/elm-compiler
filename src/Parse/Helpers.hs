@@ -122,6 +122,7 @@ symOp =
       guard (op `notElem` [ "=", "..", "->", "--", "|", "\8594", ":" ])
       case op of
         "." -> notFollowedBy lower >> return op
+        "@" -> notFollowedBy lower >> return op
         _   -> return op
 
 

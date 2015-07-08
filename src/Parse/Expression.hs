@@ -53,6 +53,27 @@ accessor =
             (ann (E.Access (ann (E.rawVar "_")) lbl))
 
 
+{- Nice record update syntax, analogous to `.field` accessors:
+
+    @field value record ≡ (\val rcrd -> { rcrd | field <- val }) value record
+
+-}
+modifier :: IParser Source.Expr'
+modifier =
+  do  (start, lbl, end) <- located (try (string "@" >> rLabel))
+
+      let ann value =
+            A.at start end value
+
+      return $
+        E.Lambda
+            (ann (P.Var "v"))
+            (ann $ E.Lambda
+                (ann (P.Var "r"))
+                (ann $ E.Modify (ann (E.rawVar "r")) [(lbl, ann $ E.rawVar "v")] )
+            )
+
+
 negative :: IParser Source.Expr'
 negative =
   do  (start, nTerm, end) <-
@@ -197,7 +218,8 @@ recordTerm =
 
 term :: IParser Source.Expr
 term =
-  addLocation (choice [ E.Literal <$> Literal.literal, listTerm, accessor, negative ])
+  addLocation (choice [ E.Literal <$> Literal.literal
+                      , listTerm, accessor, modifier, negative ])
     <|> accessible (addLocation varTerm <|> parensTerm <|> recordTerm)
     <?> "an expression"
 
