@@ -285,13 +285,13 @@ located parser =
       return (start, value, end)
 
 
-accessibleOrModifiable :: IParser Source.Expr -> IParser Source.Expr
-accessibleOrModifiable exprParser =
+accessibleOrUpdateable :: IParser Source.Expr -> IParser Source.Expr
+accessibleOrUpdateable exprParser =
   do  start <- getMyPosition
 
       annotatedRootExpr <- exprParser
 
-      try (modification start annotatedRootExpr)
+      try (update start annotatedRootExpr)
         <|> accessible start annotatedRootExpr
 
 
@@ -305,7 +305,7 @@ accessible start annotatedRootExpr@(A.A _ rootExpr) =
           return annotatedRootExpr
 
         Just _ ->
-          accessibleOrModifiable $
+          accessibleOrUpdateable $
             do  v <- var
                 end <- getMyPosition
                 return . A.at start end $
@@ -317,9 +317,10 @@ accessible start annotatedRootExpr@(A.A _ rootExpr) =
                         E.Access annotatedRootExpr v
 
 
-modification :: R.Position -> Source.Expr -> IParser Source.Expr
-modification start annotatedRootExpr =
-  do  at
+update :: R.Position -> Source.Expr -> IParser Source.Expr
+update start annotatedRootExpr =
+  do
+      at
       v <- var
       end <- getMyPosition
       let ann = A.at start end

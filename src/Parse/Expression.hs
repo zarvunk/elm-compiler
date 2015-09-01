@@ -58,8 +58,8 @@ accessor =
     @field value record ≡ (\val rcrd -> { rcrd | field <- val }) value record
 
 -}
-modifier :: IParser Source.Expr'
-modifier =
+updater :: IParser Source.Expr'
+updater =
   do  (start, lbl, end) <- located (try (string "@" >> rLabel))
 
       let ann value =
@@ -218,9 +218,9 @@ recordTerm =
 
 term :: IParser Source.Expr
 term =
-  addLocation (choice [ E.Literal <$> Literal.literal
-                      , listTerm, accessor, modifier, negative ])
-    <|> accessibleOrModifiable (addLocation varTerm <|> parensTerm <|> recordTerm)
+  addLocation (choice [ E.Literal <$> Literal.literal , listTerm
+                      , accessor, updater, negative ])
+    <|> accessibleOrUpdateable (addLocation varTerm <|> parensTerm <|> recordTerm)
     <?> "an expression"
 
 
