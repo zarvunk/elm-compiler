@@ -74,6 +74,30 @@ updater =
             )
 
 
+modifier :: IParser Source.Expr'
+modifier =
+  do  (start, lbl, end) <- located (try (string "!" >> rLabel))
+
+      let ann value =
+            A.at start end value
+
+          fieldMap f r =
+            E.App
+                (ann $ E.rawVar f)
+                (ann $ E.Access (ann $ E.rawVar r) lbl)
+
+      return $
+        E.Lambda
+            (ann (P.Var "f"))
+            (ann $ E.Lambda
+                (ann (P.Var "r"))
+                (ann $ E.Modify
+                    (ann (E.rawVar "r"))
+                    [(lbl, ann $ fieldMap "f" "r")]
+                )
+            )
+
+
 negative :: IParser Source.Expr'
 negative =
   do  (start, nTerm, end) <-
@@ -219,8 +243,8 @@ recordTerm =
 term :: IParser Source.Expr
 term =
   addLocation (choice [ E.Literal <$> Literal.literal , listTerm
-                      , accessor, updater, negative ])
-    <|> accessibleOrUpdateable (addLocation varTerm <|> parensTerm <|> recordTerm)
+                      , accessor, updater, modifier, negative ])
+    <|> accessibleOrUpdateableOrModifiable (addLocation varTerm <|> parensTerm <|> recordTerm)
     <?> "an expression"
 
 

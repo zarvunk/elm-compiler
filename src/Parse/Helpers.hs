@@ -124,6 +124,7 @@ symOp =
       case op of
         "." -> notFollowedBy lower >> return op
         "@" -> notFollowedBy lower >> return op
+        "!" -> notFollowedBy lower >> return op
         _   -> return op
 
 
@@ -285,13 +286,14 @@ located parser =
       return (start, value, end)
 
 
-accessibleOrUpdateable :: IParser Source.Expr -> IParser Source.Expr
-accessibleOrUpdateable exprParser =
+accessibleOrUpdateableOrModifiable :: IParser Source.Expr -> IParser Source.Expr
+accessibleOrUpdateableOrModifiable exprParser =
   do  start <- getMyPosition
 
       annotatedRootExpr <- exprParser
 
       try (update start annotatedRootExpr)
+        <|> try (modify start annotatedRootExpr)
         <|> accessible start annotatedRootExpr
 
 
@@ -305,7 +307,7 @@ accessible start annotatedRootExpr@(A.A _ rootExpr) =
           return annotatedRootExpr
 
         Just _ ->
-          accessibleOrUpdateable $
+          accessibleOrUpdateableOrModifiable $
             do  v <- var
                 end <- getMyPosition
                 return . A.at start end $
@@ -330,6 +332,25 @@ update start annotatedRootExpr =
             (ann $ E.Modify annotatedRootExpr [(v, ann $ E.rawVar "_")] )
 
 
+modify :: R.Position -> Source.Expr -> IParser Source.Expr
+modify start annotatedRootExpr =
+  do
+      excl
+      v <- var
+      end <- getMyPosition
+      let ann = A.at start end
+          fieldMap f =
+              E.App
+                (ann $ E.rawVar f)
+                (ann $ E.Access annotatedRootExpr v)
+      return . ann $
+          E.Lambda
+            (ann $ P.Var "f")
+            (ann $ E.Modify
+                annotatedRootExpr
+                [(v, ann $ fieldMap "f")])
+
+
 dot :: IParser ()
 dot =
   do  char '.'
@@ -339,6 +360,12 @@ dot =
 at :: IParser ()
 at =
   do  char '@'
+      return ()
+
+
+excl :: IParser ()
+excl =
+  do  char '!'
       return ()
 
 
